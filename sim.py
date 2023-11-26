@@ -54,6 +54,17 @@ class Player:
         elif self.rot > math.pi * 2:
             self.rot -= math.pi * 2
 
+class Landmark:
+
+    size = 5
+
+    def __init__(self):
+        self.x = random.randint(0, 1280)
+        self.y = random.randint(0, 720)
+
+    def draw(self, screen):
+        pygame.draw.line(screen, (255, 255, 255), (self.x - self.size, self.y - self.size), (self.x + self.size, self.y + self.size))
+        pygame.draw.line(screen, (255, 255, 255), (self.x - self.size, self.y + self.size), (self.x + self.size, self.y - self.size))
 
 class Sim:
 
@@ -62,12 +73,25 @@ class Sim:
         self.clock = clock
         self.dt = 0
 
+        self.player = 0
+        self.landmarks = []
+
+    def __init(self):
         self.player = Player()
+        self.landmarks = []
+        for _ in range(30):
+            self.landmarks.append(Landmark())
 
     def __events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
+        
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_q]:
+            return False
+        if keys[pygame.K_r]:
+            self.__init()
         
         return True
 
@@ -78,11 +102,15 @@ class Sim:
     def __draw(self):
         self.screen.fill("black")
 
+        for lm in self.landmarks:
+            lm.draw(self.screen)
         self.player.draw(self.screen)
 
         pygame.display.flip()
 
     def run(self):
+        self.__init()
+
         while self.__events():
             self.__sim()
 
