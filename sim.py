@@ -66,6 +66,61 @@ class Landmark:
         pygame.draw.line(screen, (255, 255, 255), (self.x - self.size, self.y - self.size), (self.x + self.size, self.y + self.size))
         pygame.draw.line(screen, (255, 255, 255), (self.x - self.size, self.y + self.size), (self.x + self.size, self.y - self.size))
 
+class SensorHit:
+
+    size = 3
+
+    def __init__(self, dist, heading):
+        self.dist = dist
+        self.heading = heading
+
+    def draw(self, screen, x, y, base_rot):
+
+        angle = self.heading + base_rot
+        dir_x = math.cos(angle)
+        dir_y = -math.sin(angle)
+
+        offset_x = dir_x * self.dist
+        offset_y = dir_y * self.dist
+
+        p_x = x + offset_x
+        p_y = y + offset_y
+
+        pygame.draw.line(screen, (0, 255, 255), (x, y), (p_x, p_y))
+        pygame.draw.line(screen, (255, 0, 0), (p_x - self.size, p_y - self.size), (p_x + self.size, p_y + self.size))
+        pygame.draw.line(screen, (255, 0, 0), (p_x - self.size, p_y + self.size), (p_x + self.size, p_y - self.size))
+
+
+class Sensor:
+
+    range = 200
+    sigma = math.sqrt(40.)
+
+    def __init__(self, player):
+        self.hits = []
+        self.player = player
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, (0, 255, 255), (self.player.x, self.player.y), self.range, 1)
+        for hit in self.hits:
+            hit.draw(screen, self.player.x, self.player.y, self.player.rot)
+
+    def update(self, landmarks):
+        self.hits.clear()
+
+        player_pos = np.array([self.player.x, self.player.y])
+
+        for lm in landmarks:
+            if np.linalg.norm(player_pos - [lm.x, lm.y]) < self.range:
+                offset = random.gauss(0, self.sigma)
+                angle = random.uniform(0, math.pi * 2)
+
+                noisy_pos = [lm.x, lm.y] + np.array([math.cos(angle), math.sin(angle)]) * offset
+
+                diff = noisy_pos - player_pos
+
+                self.hits.append(SensorHit(np.linalg.norm(diff), math.atan2(-diff[1], diff[0]) - self.player.rot))
+
 class Sim:
 
     def __init__(self, screen, clock):
@@ -73,13 +128,15 @@ class Sim:
         self.clock = clock
         self.dt = 0
 
-        self.player = 0
+        self.player = None
         self.landmarks = []
+        self.sensor = None
 
     def __init(self):
         self.player = Player()
-        self.landmarks = []
-        for _ in range(30):
+        self.sensor = Sensor(self.player)
+        self.landmarks.clear()
+        for _ in range(50):
             self.landmarks.append(Landmark())
 
     def __events(self):
@@ -98,12 +155,14 @@ class Sim:
     def __sim(self):
 
         self.player.update(self.dt)
+        self.sensor.update(self.landmarks)
 
     def __draw(self):
         self.screen.fill("black")
 
         for lm in self.landmarks:
             lm.draw(self.screen)
+        self.sensor.draw(self.screen)
         self.player.draw(self.screen)
 
         pygame.display.flip()
