@@ -2,8 +2,57 @@ import pygame
 import random
 import numpy as np
 import math
-import icp
+from sklearn.neighbors import NearestNeighbors
 
+class AliasRandom:
+    """
+    Pull random numbers from an arbitrary (discrete) distribution using the alias method 
+    as seen in https://www.keithschwarz.com/darts-dice-coins/
+    """
+
+    def __init__(self, weights):
+        self.n = len(weights)
+        weights *= self.n
+
+        self.prob = [0 for _ in range(self.n)]
+        self.alias = [0 for _ in range(self.n)]
+        
+        small, large = [], []
+        for i, p in enumerate(weights):
+            if p < 1:
+                small.append(i)
+            else:
+                large.append(i)
+
+        while len(small) != 0 and len(large) != 0:
+            l = small.pop()
+            g = large.pop()
+            
+            self.prob[l] = weights[l]
+            self.alias[l] = g
+
+            weights[g] = (weights[g] + weights[l]) - 1
+
+            if weights[g] < 1:
+                small.append(g)
+            else:
+                large.append(g)
+
+        while len(large) != 0:
+            g = large.pop()
+            self.prob[g] = 1
+
+        while len(small) != 0:
+            l = small.pop()
+            self.prob[l] = 1
+
+    def pull(self):
+        i = random.randint(0, self.n-1)
+        coin = random.uniform(0,1)
+
+        if coin < self.prob[i]:
+            return i
+        return self.alias[i]
 
 class Config:
 
@@ -14,7 +63,7 @@ class Config:
         self.sens_range = 200
         # noise takes std dev. set value using variance
         self.sens_noise = math.sqrt(40)
-        self.landmarks = 50
+        self.landmarks = 40
         self.particles = 200
         # assumed noise in the movement model. As above, std dev
         self.vel_noise = math.sqrt(30)
@@ -75,8 +124,8 @@ class Landmark:
     size = 5
 
     def __init__(self):
-        self.x = random.randint(0, 1280)
-        self.y = random.randint(0, 720)
+        self.x = random.uniform(0, 1280)
+        self.y = random.uniform(0, 720)
 
     def draw(self, screen):
         pygame.draw.line(screen, (255, 255, 255), (self.x - self.size, self.y - self.size), (self.x + self.size, self.y + self.size))
@@ -90,17 +139,24 @@ class SensorHit:
         self.dist = dist
         self.heading = heading
 
-    def draw(self, screen, x, y, base_rot):
-
-        angle = self.heading + base_rot
+    def get_world_pos(self, pos, rot):
+        angle = self.heading + rot
         dir_x = math.cos(angle)
         dir_y = -math.sin(angle)
 
         offset_x = dir_x * self.dist
         offset_y = dir_y * self.dist
 
+        x, y = pos
         p_x = x + offset_x
         p_y = y + offset_y
+
+        return [p_x, p_y]
+
+
+    def draw(self, screen, x, y, base_rot):
+
+        p_x, p_y = self.get_world_pos([x, y], base_rot)
 
         pygame.draw.line(screen, (0, 255, 255), (x, y), (p_x, p_y))
         pygame.draw.line(screen, (255, 0, 0), (p_x - self.size, p_y - self.size), (p_x + self.size, p_y + self.size))
@@ -190,12 +246,45 @@ class ParticleFilter:
             elif particle.rot > math.pi * 2:
                 particle.rot -= math.pi * 2
 
-    def update(self, dt):
+    def correction(self, landmarks, hits):
+        weights = np.array([])
+        weight_sum = 0
+        n_hits = len(hits)
+        landmark_poses = np.array([[l.x, l.y] for l in landmarks])
+        landmark_nn = NearestNeighbors(algorithm='kd_tree')
+        landmark_nn.fit(landmark_poses)
+
+        for particle in self.particles:
+            hit_positions = [hit.get_world_pos(particle.pos, particle.rot) for hit in hits]
+            
+            closest_landmarks_idcs = landmark_nn.kneighbors([particle.pos], n_hits, False)
+            closest_landmarks = landmark_poses[closest_landmarks_idcs[0]]
+            
+            match_nn = NearestNeighbors(algorithm='kd_tree')
+            match_nn.fit(closest_landmarks)
+            dists, _ = match_nn.kneighbors(hit_positions, 1)
+
+            # we scale down the distances before computing the error term in order to prevent the computed weights
+            # from becoming too small
+            weight = math.exp(-np.sum(np.square(dists / 1000)))
+            weights = np.append(weights, weight)
+            weight_sum += weight
+
+        weights /= weight_sum
+        return weights
+
+    def update(self, dt, landmarks, hits):
         self.prediction(dt)
 
-        #correction
+        weights = self.correction(landmarks, hits)
 
-        #resampling
+        rand = AliasRandom(weights)
+        new_particles = []
+        for _ in range(self.config.particles):
+            i = rand.pull()
+            new_particles.append(Particle.copy(self.particles[i]))
+
+        self.particles = new_particles
 
 class Sim:
 
@@ -235,7 +324,7 @@ class Sim:
 
         self.player.update(self.dt)
         self.sensor.update(self.landmarks)
-        self.filter.update(self.dt)
+        self.filter.update(self.dt, self.landmarks, self.sensor.hits)
 
     def __draw(self):
         self.screen.fill("black")
