@@ -3,16 +3,26 @@ import random
 import numpy as np
 import math
 
+class Config:
+
+    def __init__(self):
+
+        self.vel = 300
+        self.angular_vel = math.pi
+        self.sens_range = 200
+        # noise takes std dev. set value using variance
+        self.sens_noise = math.sqrt(40)
+        self.landmarks = 50
+
 class Player:
 
     polygon = [[0, -20], [-8, 8], [0,0], [8, 8]]
-    linear_vel = 300
-    rot_vel = math.pi / 2
 
-    def __init__(self):
+    def __init__(self, config):
         self.x = random.randint(0, 1280)
         self.y = random.randint(0, 720)
         self.rot = 0
+        self.config = config
 
     def draw(self, screen):
         rotmat = [[math.cos(self.rot), -math.sin(self.rot)],
@@ -29,11 +39,11 @@ class Player:
         dir_y = -math.cos(self.rot)
 
         if keys[pygame.K_w]:
-            self.x += dir_x * self.linear_vel * dt
-            self.y += dir_y * self.linear_vel * dt
+            self.x += dir_x * self.config.vel * dt
+            self.y += dir_y * self.config.vel * dt
         if keys[pygame.K_s]:
-            self.x -= dir_x * self.linear_vel * dt
-            self.y -= dir_y * self.linear_vel * dt
+            self.x -= dir_x * self.config.vel * dt
+            self.y -= dir_y * self.config.vel * dt
 
         if self.x > 1280:
             self.x = 1280
@@ -45,9 +55,9 @@ class Player:
             self.y = 0
 
         if keys[pygame.K_a]:
-            self.rot += self.rot_vel * dt
+            self.rot += self.config.angular_vel * dt
         if keys[pygame.K_d]:
-            self.rot -= self.rot_vel * dt
+            self.rot -= self.config.angular_vel * dt
 
         if self.rot < 0:
             self.rot += math.pi * 2
@@ -93,15 +103,13 @@ class SensorHit:
 
 class Sensor:
 
-    range = 200
-    sigma = math.sqrt(40.)
-
-    def __init__(self, player):
+    def __init__(self, player, config):
         self.hits = []
         self.player = player
+        self.config = config
 
     def draw(self, screen):
-        pygame.draw.circle(screen, (0, 255, 255), (self.player.x, self.player.y), self.range, 1)
+        pygame.draw.circle(screen, (0, 255, 255), (self.player.x, self.player.y), self.config.sens_range, 1)
         for hit in self.hits:
             hit.draw(screen, self.player.x, self.player.y, self.player.rot)
 
@@ -111,8 +119,8 @@ class Sensor:
         player_pos = np.array([self.player.x, self.player.y])
 
         for lm in landmarks:
-            if np.linalg.norm(player_pos - [lm.x, lm.y]) < self.range:
-                offset = random.gauss(0, self.sigma)
+            if np.linalg.norm(player_pos - [lm.x, lm.y]) < self.config.sens_range:
+                offset = random.gauss(0, self.config.sens_noise)
                 angle = random.uniform(0, math.pi * 2)
 
                 noisy_pos = [lm.x, lm.y] + np.array([math.cos(angle), math.sin(angle)]) * offset
@@ -131,12 +139,13 @@ class Sim:
         self.player = None
         self.landmarks = []
         self.sensor = None
+        self.config = Config()
 
     def __init(self):
-        self.player = Player()
-        self.sensor = Sensor(self.player)
+        self.player = Player(self.config)
+        self.sensor = Sensor(self.player, self.config)
         self.landmarks.clear()
-        for _ in range(50):
+        for _ in range(self.config.landmarks):
             self.landmarks.append(Landmark())
 
     def __events(self):
