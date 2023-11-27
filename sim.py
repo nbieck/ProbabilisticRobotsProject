@@ -65,9 +65,12 @@ class Config:
         self.sens_noise = math.sqrt(40)
         self.landmarks = 40
         self.particles = 200
+        self.starting_particle_radius = 400
         # assumed noise in the movement model. As above, std dev
-        self.vel_noise = math.sqrt(30)
-        self.rot_vel_noise = math.sqrt(math.pi / 8)
+        self.vel_noise = math.sqrt(200)
+        self.rot_vel_noise = math.sqrt(math.pi / 4)
+
+        self.anti_deprivation_threshold = 0.01
 
 class Player:
 
@@ -196,6 +199,11 @@ class Particle:
     def make_rand():
         return Particle(np.array([random.uniform(0,1280), random.uniform(0,720)]), random.uniform(0, math.pi * 2))
 
+    def make_around(pos, max_r):
+        r = random.uniform(0, max_r)
+        angle = random.uniform(0, math.pi * 2)
+        return Particle(np.array([pos[0] + r * math.cos(angle), pos[1] + r * math.sin(angle)]), random.uniform(0, math.pi * 2))
+
     def copy(other):
         return Particle(np.copy(other.pos), other.rot)
 
@@ -209,12 +217,12 @@ class Particle:
 
 class ParticleFilter:
 
-    def __init__(self, config):
+    def __init__(self, config, pos):
         self.config = config
 
         self.particles = []
         for _ in range(config.particles):
-            self.particles.append(Particle.make_rand())
+            self.particles.append(Particle.make_around(pos, config.starting_particle_radius))
 
     def draw(self, screen):
         for particle in self.particles:
@@ -246,10 +254,14 @@ class ParticleFilter:
             elif particle.rot > math.pi * 2:
                 particle.rot -= math.pi * 2
 
+    # return None if no observation was made
     def correction(self, landmarks, hits):
+        n_hits = len(hits)
+        if n_hits == 0:
+            return
+
         weights = np.array([])
         weight_sum = 0
-        n_hits = len(hits)
         landmark_poses = np.array([[l.x, l.y] for l in landmarks])
         landmark_nn = NearestNeighbors(algorithm='kd_tree')
         landmark_nn.fit(landmark_poses)
@@ -266,7 +278,7 @@ class ParticleFilter:
 
             # we scale down the distances before computing the error term in order to prevent the computed weights
             # from becoming too small
-            weight = math.exp(-np.sum(np.square(dists / 1000)))
+            weight = math.exp(-np.sum(np.square(dists / 100)))
             weights = np.append(weights, weight)
             weight_sum += weight
 
@@ -278,13 +290,19 @@ class ParticleFilter:
 
         weights = self.correction(landmarks, hits)
 
-        rand = AliasRandom(weights)
-        new_particles = []
-        for _ in range(self.config.particles):
-            i = rand.pull()
-            new_particles.append(Particle.copy(self.particles[i]))
+        if weights is not None:
+            rand = AliasRandom(weights)
+            new_particles = []
+            for _ in range(self.config.particles):
+                # Based on the comment in https://en.wikipedia.org/wiki/Monte_Carlo_localization#Particle_deprivation
+                # We have a random low chance of using a random particle to avoid deprivation
+                if random.random() < self.config.anti_deprivation_threshold:
+                    new_particles.append(Particle.make_rand())
+                else:
+                    i = rand.pull()
+                    new_particles.append(Particle.copy(self.particles[i]))
 
-        self.particles = new_particles
+            self.particles = new_particles
 
 class Sim:
 
@@ -305,7 +323,7 @@ class Sim:
         self.landmarks.clear()
         for _ in range(self.config.landmarks):
             self.landmarks.append(Landmark())
-        self.filter = ParticleFilter(self.config)
+        self.filter = ParticleFilter(self.config, [self.player.x, self.player.y])
 
     def __events(self):
         for event in pygame.event.get():
